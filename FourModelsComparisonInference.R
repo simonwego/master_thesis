@@ -5,6 +5,11 @@ library(tidyr)
 library(ggplot2)
 library(plotly)
 library(RTMB)
+library(tidyverse)
+library(patchwork)
+library(scales)
+library(gt)
+library(knitr)
 
 # ============================================================
 # 1. Data preparation
@@ -1423,3 +1428,1500 @@ saveRDS(latent_positions, paths$latent_positions)
 saveRDS(dyad_effects, paths$dyad_effects)
 saveRDS(probability_agreement, paths$agreement)
 saveRDS(all_outputs, paths$outputs_light)
+
+
+highlight_fileids <- c(
+  "Alados_1992b",
+  "Adcock_2015a",
+  "Blatrix_2004c",
+  "Poisbleau_2005c",
+  "Shimoji_2014c", 
+  "Cote_2000d",
+  "Correa_2013a",
+  "Kolodziejczyk_2005",
+  "Cui_2014",
+  "Prieto_1978",
+  "Mwamende_2009a",
+  "ScottLockhard_1999b"
+)
+
+selected_colours <- c(
+  "Other" = "grey75", 
+  "Correa_2013a" = "brown",
+  "Alados_1992b" = "red", 
+  "Adcock_2015a" = "orange", 
+  "Blatrix_2004c" = "yellow", 
+  "Poisbleau_2005c" = "green", 
+  "Shimoji_2014c" = "blue", 
+  "Kolodziejczyk_2005" = "purple", 
+  "Cote_2000d" = "violet", 
+  "Cui_2014" = "darkblue", 
+  "Prieto_1978" = "black",
+  "Mwamende_2009a" = "magenta",
+  "ScottLockhard_1999b" = "cyan"
+)
+# =============================================================
+# 10. Tables 
+# =============================================================
+
+escape_latex <- function(x) {
+  x %>%
+    str_replace_all("\\\\", "\\\\textbackslash{}") %>%
+    str_replace_all("_", "\\\\_") %>%
+    str_replace_all("&", "\\\\&") %>%
+    str_replace_all("%", "\\\\%") %>%
+    str_replace_all("#", "\\\\#")
+}
+
+fmt_num <- function(x, digits = 2) {
+  ifelse(
+    is.na(x) | is.nan(x) | is.infinite(x),
+    "--",
+    formatC(x, digits = digits, format = "f", drop0trailing = TRUE)
+  )
+}
+
+lrt_aic_table <- results %>%
+  filter(fileid %in% highlight_fileids) %>%
+  arrange(fileid) %>%
+  transmute(
+    Dataset = escape_latex(fileid),
+    
+    `LRT: Null vs Full` = fmt_num(lrt_null_vs_full),
+    `LRT: Null vs Only theta` = fmt_num(lrt_null_vs_only_theta),
+    `LRT: Full vs Full theta` = fmt_num(lrt_full_vs_full_theta),
+    `LRT: Only theta vs Full theta` = fmt_num(lrt_only_theta_vs_full_theta),
+    
+    `AIC Null` = fmt_num(null_AIC),
+    `AIC Full` = fmt_num(full_AIC),
+    `AIC Only theta` = fmt_num(only_theta_AIC),
+    `AIC Full theta` = fmt_num(full_theta_AIC)
+  )
+
+latex_rows <- lrt_aic_table %>%
+  mutate(
+    row = paste(
+      Dataset,
+      `LRT: Null vs Full`,
+      `LRT: Null vs Only theta`,
+      `LRT: Full vs Full theta`,
+      `LRT: Only theta vs Full theta`,
+      `AIC Null`,
+      `AIC Full`,
+      `AIC Only theta`,
+      `AIC Full theta`,
+      sep = " & "
+    ),
+    row = paste0(row, " \\\\")
+  ) %>%
+  pull(row)
+
+latex_code <- paste(
+  "\\begin{table}[htbp]",
+  "\\centering",
+  "\\scriptsize",
+  "\\setlength{\\tabcolsep}{3pt}",
+  "\\caption{Likelihood ratio statistics and AIC scores for the selected datasets.}",
+  "\\label{tab:highlight_lrt_aic}",
+  "\\resizebox{\\textwidth}{!}{%",
+  "\\begin{tabular}{lcccccccc}",
+  "\\toprule",
+  "Dataset & $\\Lambda_{N,F}$ & $\\Lambda_{N,O}$ & $\\Lambda_{F,F_\\theta}$ & $\\Lambda_{O,F_\\theta}$ & AIC$_N$ & AIC$_F$ & AIC$_O$ & AIC$_{F_\\theta}$ \\\\",
+  "\\midrule",
+  paste(latex_rows, collapse = "\n"),
+  "\\bottomrule",
+  "\\end{tabular}%",
+  "}",
+  "\\end{table}",
+  sep = "\n"
+)
+
+hessian_diag_table <- results %>%
+  filter(fileid %in% highlight_fileids) %>%
+  arrange(fileid) %>%
+  select(
+    fileid,
+    
+    null_hess_min_eig,
+    null_hess_abs_cond,
+    null_max_grad,
+    null_hess_status,
+    
+    full_hess_min_eig,
+    full_hess_abs_cond,
+    full_max_grad,
+    full_hess_status,
+    
+    only_theta_hess_min_eig,
+    only_theta_hess_abs_cond,
+    only_theta_max_grad,
+    only_theta_hess_status,
+    
+    full_theta_hess_min_eig,
+    full_theta_hess_abs_cond,
+    full_theta_max_grad,
+    full_theta_hess_status
+  ) %>%
+  pivot_longer(
+    cols = -fileid,
+    names_to = c("model", ".value"),
+    names_pattern = "^(null|full|only_theta|full_theta)_(hess_min_eig|hess_abs_cond|max_grad|hess_status)$"
+  ) %>%
+  mutate(
+    model = factor(model, levels = model_order),
+    Dataset = escape_latex(fileid),
+    Model = unname(model_labels[as.character(model)]),
+    min_eig = fmt_num(hess_min_eig),
+    cond_num = fmt_num(hess_abs_cond),
+    max_grad = fmt_num(max_grad),
+    hess_status = ifelse(
+      is.na(hess_status),
+      "--",
+      escape_latex(as.character(hess_status))
+    )
+  ) %>%
+  arrange(Dataset, model) %>%
+  select(
+    Dataset,
+    Model,
+    min_eig,
+    cond_num,
+    max_grad,
+    hess_status
+  )
+
+latex_rows <- hessian_diag_table %>%
+  mutate(
+    row = paste(
+      Dataset,
+      Model,
+      min_eig,
+      cond_num,
+      max_grad,
+      hess_status,
+      sep = " & "
+    ),
+    row = paste0(row, " \\\\")
+  ) %>%
+  pull(row)
+
+latex_code <- paste(
+  "\\begin{table}[htbp]",
+  "\\centering",
+  "\\scriptsize",
+  "\\setlength{\\tabcolsep}{4pt}",
+  "\\caption{Hessian diagnostics for the selected datasets and fitted models. The table reports the minimum eigenvalue of the fixed-parameter Hessian, the absolute condition number, the maximum absolute gradient component, and the Hessian status.}",
+  "\\label{tab:highlight_hessian_diagnostics}",
+  "\\resizebox{\\textwidth}{!}{%",
+  "\\begin{tabular}{llrrrr}",
+  "\\toprule",
+  "Dataset & Model & $\\lambda_{\\min}(H)$ & $\\kappa(H)$ & $\\|\\nabla f\\|_\\infty$ & Hessian status \\\\",
+  "\\midrule",
+  paste(latex_rows, collapse = "\n"),
+  "\\bottomrule",
+  "\\end{tabular}%",
+  "}",
+  "\\end{table}",
+  sep = "\n"
+)
+
+summary_table <- results %>%
+  select(
+    n_agents,
+    interactions_per_observed_dyad,
+    proportion_unknown,
+    dci,
+    ttri,
+    modified_landaus_h
+  ) %>%
+  pivot_longer(
+    cols = everything(),
+    names_to = "metric",
+    values_to = "value"
+  ) %>%
+  group_by(metric) %>%
+  summarise(
+    Mean = mean(value, na.rm = TRUE),
+    Median = median(value, na.rm = TRUE),
+    SD = sd(value, na.rm = TRUE),
+    IQR = IQR(value, na.rm = TRUE),
+    Min = min(value, na.rm = TRUE),
+    Max = max(value, na.rm = TRUE),
+    .groups = "drop"
+  )
+summary_table
+
+
+# ============================================================
+# 11. Figures
+# ============================================================
+
+data_explanalysis_ploting <- results %>%
+  mutate(
+    highlighted = if_else(fileid %in% highlight_fileids, fileid, "Other")
+  )
+cor_fun <- function(data, mapping, ...) {
+  x <- eval_data_col(data, mapping$x)
+  y <- eval_data_col(data, mapping$y)
+  
+  test <- cor.test(x, y, use = "complete.obs")
+  r <- test$estimate
+  p <- test$p.value
+  
+  stars <- case_when(
+    p < 0.001 ~ "***",
+    p < 0.01  ~ "**",
+    p < 0.05  ~ "*",
+    TRUE      ~ ""
+  )
+  
+  ggplot() +
+    annotate(
+      "text",
+      x = 0.5,
+      y = 0.5,
+      label = paste0("Corr: ", round(r, 3), stars),
+      size = 3.5
+    ) +
+    xlim(0, 1) +
+    ylim(0, 1) +
+    theme_void()
+}
+lower_fun <- function(data, mapping, ...) {
+  x_var <- as_label(mapping$x)
+  y_var <- as_label(mapping$y)
+  
+  ggplot(data, aes(x = .data[[x_var]], y = .data[[y_var]])) +
+    geom_point(
+      data = data %>% filter(highlighted == "Other"),
+      color = "grey75",
+      alpha = 0.25,
+      size = 0.8
+    ) +
+    geom_point(
+      data = data %>% filter(highlighted != "Other"),
+      aes(color = highlighted),
+      alpha = 1,
+      size = 1.8
+    )
+}
+
+data_explanalysis_ploting %>%
+  select(fileid, highlighted, all_of(metrics)) %>%
+  ggpairs(
+    columns = metrics,
+    columnLabels = pretty_labs,
+    aes(color = highlighted, alpha = highlighted),
+    upper = list(continuous = cor_fun),
+    lower = list(continuous = lower_fun
+                 ),
+    diag = list(
+      continuous = wrap("densityDiag", alpha = 0.4)
+    )
+  ) +
+  scale_color_manual(
+        values = selected_colours
+  ) +
+  theme_bw()
+p_a <- ggplot(
+  plot_df,
+  aes(x = full_a_est + eps, y = full_theta_a_est + eps, color = fileid_highlight)
+) +
+  geom_abline(
+    intercept = 0,
+    slope = 1,
+    linewidth = 0.6,
+    linetype = "dashed"
+  ) +
+  geom_point(
+    data = filter(plot_df, fileid_highlight == "Other"),
+    colour = "grey75",
+    alpha = 0.6,
+    size = 2.0
+  ) +
+  geom_point(
+    data = filter(plot_df, fileid_highlight != "Other"),
+    aes(colour = fileid_highlight),
+    alpha = 1,
+    size = 5.2
+  ) +
+  scale_x_log10() +
+  scale_y_log10() +
+  coord_equal() +
+  scale_colour_manual(
+    values = selected_colours,
+    guide = "none"
+  ) +
+  labs(
+    x = expression(hat(a)[LID]),
+    y = expression(hat(a)[DALID]),
+    title = ""
+  ) +
+  theme_bw(base_size = 28) +
+  theme(
+    axis.title = element_text(face = "bold"),
+    axis.text = element_text(size = 22),
+    panel.grid.minor = element_blank()
+  )
+p_sigma <- ggplot(
+  plot_df,
+  aes(x = only_theta_sigma_theta_est + eps, y = full_theta_sigma_theta_est + eps, color = fileid_highlight)
+) +
+  geom_abline(
+    intercept = 0,
+    slope = 1,
+    linewidth = 0.6,
+    linetype = "dashed"
+  ) +
+  geom_point(
+    data = filter(plot_df, fileid_highlight == "Other"),
+    colour = "grey75",
+    alpha = 0.6,
+    size = 2.0
+  ) +
+  geom_point(
+    data = filter(plot_df, fileid_highlight != "Other"),
+    aes(colour = fileid_highlight),
+    alpha = 1,
+    size = 5.2
+  ) +
+  scale_x_log10() +
+  scale_y_log10() +
+  scale_colour_manual(
+    values = selected_colours,
+    guide = "none"
+  ) +
+  labs(
+    x = expression(hat(sigma)[theta*","*DABT]),
+    y = expression(hat(sigma)[theta*","*DALID]),
+    title = ""
+  ) +
+  theme_bw(base_size = 28) +
+  theme(
+    axis.title = element_text(face = "bold"),
+    axis.text = element_text(size = 22),
+    panel.grid.minor = element_blank(),
+    aspect.ratio = 1
+  )
+
+  # ============================================================
+  # Likelihood diagnostics
+  # ============================================================
+
+eps <- 1e-8
+p_lrt_bltlid <- res |>
+  filter(!is.na(full_a_est), !is.na(lrt_null_vs_full)) |>
+  mutate(a_plot = full_a_est + eps) |>
+  ggplot(aes(x = a_plot, y = lrt_null_vs_full)) +
+  geom_point(alpha = 0.55) +
+  scale_x_log10() +
+  scale_y_continuous(trans = "sqrt") +
+  labs(
+    x = expression(hat(a)[LID] + epsilon),
+    y = expression(Lambda[LBT-LID]),
+    title = "Estimated intransitivity coefficient and model improvement LBT vs LID"
+  ) +
+  theme_bw()
+
+p_lrt_liddalid <- res |>
+  filter(!is.na(full_theta_sigma_theta_est), !is.na(lrt_full_vs_full_theta)) |>
+  mutate(a_plot = full_theta_sigma_theta_est + eps) |>
+  ggplot(aes(x = a_plot, y = lrt_full_vs_full_theta)) +
+  geom_point(alpha = 0.55) +
+  scale_x_log10() +
+  scale_y_continuous(trans = "sqrt") +
+  labs(
+    x = expression(hat(sigma)[DALID] + epsilon),
+    y = expression(Lambda[LID-DALID]),
+    title = "Estimated random effect scale and model improvement LID vs DALID"
+  ) +
+  theme_bw()
+
+p_lrt_lbtdabt <- res |>
+  mutate(a_plot = only_theta_sigma_theta_est + eps) |>
+  ggplot(aes(x = a_plot, y = lrt_null_vs_only_theta)) +
+  geom_point(alpha = 0.55) +
+  scale_x_log10() +
+  scale_y_continuous(trans = "sqrt") +
+  labs(
+    x = expression(hat(sigma)[DABT] + epsilon),
+    y = expression(Lambda[LBT-DABT]),
+    title = "Estimated random effect scale and model improvement LBT vs DABT"
+  ) +
+  theme_bw()
+
+p_lrt_dabtdalid <- res |>
+  mutate(a_plot = full_theta_a_est + eps) |>
+  ggplot(aes(x = a_plot, y = lrt_only_theta_vs_full_theta)) +
+  geom_point(alpha = 0.55) +
+  scale_x_log10() +
+  scale_y_continuous(trans = "sqrt") +
+  labs(
+    x = expression(hat(a)[DALID] + epsilon),
+    y = expression(Lambda[DABT-DALID]),
+    title = "Estimated intransitivity coefficient and model improvement DABT vs DALID"
+  ) +
+  theme_bw()
+
+crit_mix_005 <- qchisq(0.90, df = 1)  # 2.705543
+
+lrt_summary <- results %>%
+  select(
+    lrt_null_vs_full,
+    lrt_null_vs_only_theta,
+    lrt_full_vs_full_theta,
+    lrt_only_theta_vs_full_theta
+  ) %>%
+  pivot_longer(
+    cols = everything(),
+    names_to = "comparison",
+    values_to = "lrt"
+  ) %>%
+  mutate(
+    comparison = recode(
+      comparison,
+      lrt_null_vs_full = "LBT vs LID",
+      lrt_null_vs_only_theta = "LBT vs DABT",
+      lrt_full_vs_full_theta = "LID vs DALID",
+      lrt_only_theta_vs_full_theta = "DABT vs DALID"
+    ),
+    category = case_when(
+      is.na(lrt) ~ "Missing",
+      lrt < 1e-8 ~ "< 1e-8",
+      lrt >= 1e-8 & lrt <= crit_mix_005 ~ "1e-8 to 2.7055",
+      lrt > crit_mix_005 ~ "> 2.7055"
+    )
+  ) %>%
+  count(comparison, category) %>%
+  pivot_wider(
+    names_from = category,
+    values_from = n,
+    values_fill = 0
+  ) 
+lrt_summary
+lrt_summary_gt <- lrt_summary %>%
+  gt() %>%
+  tab_caption(
+    md("Summary of likelihood ratio statistics for the four model comparisons.")
+  ) %>%
+  cols_label(
+    comparison = "Model comparison",
+    `< 1e-8` = md("LRT $< 10^{-8}$"),
+    `1e-8 to 2.7055` = md("$10^{-8} \\leq$ LRT $\\leq 2.7055$"),
+    `> 2.7055` = md("LRT $> 2.7055$")
+  ) %>%
+  tab_options(
+    table.font.size = px(12),
+    column_labels.font.weight = "bold"
+  )
+gtsave(
+  lrt_summary_gt,
+  filename = "lrt_summary_table.tex"
+)
+
+# ============================================================
+# Parameters against LRT
+# ============================================================
+
+make_estimate_lrt_plot <- function(data,
+                                   estimate_col,
+                                   lrt_col,
+                                   x_lab,
+                                   y_lab = "LRT statistic",
+                                   title_lab = NULL,
+                                   log_x = FALSE,
+                                   log_y = FALSE,
+                                   eps = 1e-6,
+                                   highlight_fileids,
+                                   highlight_values) {
+  crit_mix_005 <- qchisq(0.90, df = 1)
+  plot_data <- data %>%
+    mutate(
+      highlighted = if_else(fileid %in% highlight_fileids, fileid, "Other"),
+      estimate = .data[[estimate_col]],
+      lrt = .data[[lrt_col]],
+      estimate_plot = if_else(rep(log_x, 410), estimate + eps, estimate),
+      lrt_plot = if_else(rep(log_y, 410), lrt + eps, lrt)
+    ) %>%
+    filter(
+      is.finite(estimate_plot),
+      is.finite(lrt_plot),
+      !is.na(estimate_plot),
+      !is.na(lrt_plot)
+    )
+  
+  if (log_x) {
+    plot_data <- plot_data %>%
+      filter(estimate_plot > 0)
+  }
+  
+  if (log_y) {
+    plot_data <- plot_data %>%
+      filter(lrt_plot > 0)
+  }
+  
+  p <- ggplot(plot_data, aes(x = estimate_plot, y = lrt_plot)) +
+    geom_point(
+      data = \(d) d %>% filter(highlighted == "Other"),
+      colour = "grey75",
+      alpha = 0.6,
+      size = 2.0
+    ) +
+    geom_hline(
+      yintercept = crit_mix_005,
+      linetype = "dashed",
+      linewidth = 0.9,
+      colour = "black"
+    ) +
+    geom_point(
+      data = \(d) d %>% filter(highlighted != "Other"),
+      aes(colour = highlighted),
+      alpha = 1,
+      size = 5.2
+    ) +
+    scale_colour_manual(
+      values = highlight_values,
+      guide = "none"
+    ) +
+    labs(
+      x = x_lab,
+      y = y_lab,
+      title = title_lab
+    ) +
+    theme_bw(base_size = 28) +
+    theme(
+      plot.title = element_text(face = "bold", size = 22),
+      axis.title = element_text(face = "bold", size = 22),
+      axis.text = element_text(size = 22, colour = "black"),
+      panel.grid.minor = element_blank(),
+      legend.position = "none",
+      aspect.ratio = 1
+    )
+  
+  if (log_x) {
+    p <- p + scale_x_log10()
+  }
+  
+  if (log_y) {
+    p <- p + scale_y_log10()
+  }
+  
+  p
+}
+
+p_a_lid_lrt <- make_estimate_lrt_plot(
+  data = results,
+  estimate_col = "full_a_est",
+  lrt_col = "lrt_null_vs_full",
+  x_lab = expression(hat(a)[LID] ),
+  y_lab = expression(LRT[LBT~vs.~LID]),
+  title_lab = "",
+  log_x = TRUE,
+  log_y = TRUE,
+  eps = 1e-8,
+  highlight_fileids = highlight_fileids,
+  highlight_values = selected_colours
+)
+p_a_lid_lrt
+p_sigma_dalid_lrt <- make_estimate_lrt_plot(
+  data = results,
+  estimate_col = "full_theta_sigma_theta_est",
+  lrt_col = "lrt_full_vs_full_theta",
+  x_lab = expression(hat(sigma)[theta*","*DALID]),
+  y_lab = expression(LRT[LID~vs.~DALID]),
+  title_lab = "",
+  log_x = TRUE,
+  log_y = TRUE,
+  eps = 1e-8,
+  highlight_fileids = highlight_fileids,
+  highlight_values = selected_colours
+)
+p_sigma_dalid_lrt
+p_sigma_dabt_lrt <- make_estimate_lrt_plot(
+  data = results,
+  estimate_col = "only_theta_sigma_theta_est",
+  lrt_col = "lrt_null_vs_only_theta",
+  x_lab = expression(hat(sigma)[theta*","*DABT]),
+  y_lab = expression(LRT[LBT~vs.~DABT]),
+  title_lab = "",
+  log_x = TRUE,
+  log_y = TRUE,
+  eps = 1e-8,
+  highlight_fileids = highlight_fileids,
+  highlight_values = selected_colours
+)
+p_sigma_dabt_lrt
+p_sigma_dalid_lrt <- make_estimate_lrt_plot(
+  data = results,
+  estimate_col = "full_theta_a_est",
+  lrt_col = "lrt_only_theta_vs_full_theta",
+  x_lab = expression(hat(a)[DALID]),
+  y_lab = expression(LRT[DABT~vs.~DALID]),
+  title_lab = "",
+  log_x = TRUE,
+  log_y = TRUE,
+  eps = 1e-8,
+  highlight_fileids = highlight_fileids,
+  highlight_values = selected_colours
+)
+p_sigma_dalid_lrt
+
+
+# ============================================================
+# Hessian diagnostics
+# ============================================================
+
+highlighted_datasets <- setdiff(names(highlight_values), "Other")
+
+signed_log10 <- function(x) {
+  sign(x) * log10(1 + abs(x))
+}
+
+hess_diag_long <- results |>
+  select(
+    dataset_name,
+    matches("^(null|full|only_theta|full_theta)_(max_grad|hess_)")
+  ) |>
+  pivot_longer(
+    cols = -dataset_name,
+    names_to = c("model", ".value"),
+    names_pattern = "^(full_theta|only_theta|full|null)_(.*)$"
+  ) |>
+  mutate(
+    model = recode(
+      model,
+      null = "LBT",
+      full = "LID",
+      only_theta = "DABT",
+      full_theta = "DALID"
+    ),
+    model = factor(model, levels = c("LBT", "LID", "DABT", "DALID")),
+    
+    hess_min_eig_slog10 = signed_log10(hess_min_eig),
+    hess_abs_cond_log10 = if_else(
+      hess_abs_cond > 0 & is.finite(hess_abs_cond),
+      log10(hess_abs_cond),
+      NA_real_
+    ),
+    
+    highlight_group = if_else(
+      dataset_name %in% highlighted_datasets,
+      dataset_name,
+      "Other"
+    ),
+    highlight_group = factor(highlight_group, levels = names(highlight_values))
+  )
+glimpse(hess_diag_long)
+
+make_hess_boxplot <- function(data, yvar, ylab, title, log_scale = FALSE) {
+  
+  plot_data <- data |>
+    filter(
+      !is.na(.data[[yvar]]),
+      is.finite(.data[[yvar]])
+    )
+  
+  p <- ggplot(plot_data, aes(x = model, y = .data[[yvar]])) +
+    geom_boxplot(
+      outlier.shape = NA,
+      width = 0.7
+    ) +
+    geom_jitter(
+      data = plot_data |> filter(highlight_group == "Other"),
+      color = unname(highlight_values["Other"]),
+      width = 0.18,
+      height = 0,
+      size = 1.5,
+      alpha = 0.5
+    ) +
+    geom_jitter(
+      data = plot_data |> filter(highlight_group != "Other"),
+      aes(color = highlight_group),
+      width = 0.18,
+      height = 0,
+      size = 5.2,
+      alpha = 1.0
+    ) +
+    scale_color_manual(values = highlight_values, drop = FALSE) +
+    labs(
+      x = "Model",
+      y = ylab,
+      title = title
+    ) +
+    guides(color = "none") +
+    theme_bw(base_size = 24) +
+    theme(
+      legend.position = "none",
+      plot.title = element_text(face = "bold"),
+      axis.text.x = element_text(angle = 0, hjust = 0.5)
+    )
+  
+  if (log_scale) {
+    p <- p + scale_y_log10()
+  }
+  
+  p
+}
+
+compress_expand_trans <- function(neg_factor = 0.25, pos_factor = 2) {
+  trans_new(
+    name = "compress_expand",
+    transform = function(x) {
+      ifelse(x < 0, x * neg_factor, x * pos_factor)
+    },
+    inverse = function(x) {
+      ifelse(x < 0, x / neg_factor, x / pos_factor)
+    }
+  )
+}
+
+p_min_eig <- hess_diag_long |>
+  make_hess_boxplot(
+    yvar = "hess_min_eig_slog10",
+    ylab = expression(sign(lambda[min]) %.% log[10](1 + abs(lambda[min]))),
+    title = "",
+    log_scale = FALSE
+  ) +
+  geom_hline(
+    yintercept = 0,
+    linetype = "dashed",
+    linewidth = 0.4
+  ) +
+  scale_y_continuous(
+    trans = compress_expand_trans(
+      neg_factor = 0.22,   # komprimer negativ del
+      pos_factor = 2.0     # strekk positiv del
+    ),
+    breaks = c(-7, -5, -2.5, 0, 0.5, 1, 1.5),
+    labels = c("-7", "-5", "-2.5", "0", "0.5", "1", "1.5")
+  )
+p_min_eig
+
+loglog10_trans <- scales::trans_new(
+  name = "loglog10",
+  transform = function(x) log10(1 + log10(x)),
+  inverse = function(y) 10^(10^y - 1)
+)
+p_abs_cond <- hess_diag_long |>
+  filter(hess_abs_cond > 0) |>
+  make_hess_boxplot(
+    yvar = "hess_abs_cond",
+    ylab = "Absolute Hessian condition number",
+    title = "",
+    log_scale = FALSE
+  ) +
+  scale_y_continuous(
+    trans = loglog10_trans,
+    breaks = c(1e0, 1e2, 1e5, 1e8, 1e12, 1e18, 1e26),
+    labels = scales::scientific
+  )
+p_abs_cond
+
+hess_status_pattern_table <- results |>
+  transmute(
+    LBT   = null_hess_status_clean,
+    LID   = full_hess_status_clean,
+    DABT  = only_theta_hess_status_clean,
+    DALID = full_theta_hess_status_clean
+  ) |>
+  mutate(
+    across(
+      everything(),
+      ~ if_else(is.na(.x), "Missing status", .x)
+    )
+  ) |>
+  count(LBT, LID, DABT, DALID, name = "n_datasets") |>
+  mutate(
+    proportion = n_datasets / sum(n_datasets),
+    
+    n_positive_definite = rowSums(
+      across(c(LBT, LID, DABT, DALID), ~ .x == "Positive definite")
+    ),
+    n_near_singular = rowSums(
+      across(c(LBT, LID, DABT, DALID), ~ .x == "Near-singular")
+    ),
+    n_indefinite = rowSums(
+      across(c(LBT, LID, DABT, DALID), ~ .x == "Indefinite")
+    ),
+    n_failed_or_nonfinite = rowSums(
+      across(
+        c(LBT, LID, DABT, DALID),
+        ~ .x %in% c(
+          "Fit failed",
+          "Hessian failed",
+          "Hessian non-finite",
+          "Eigen failed",
+          "Eigenvalue missing",
+          "Hessian status missing",
+          "Missing status"
+        )
+      )
+    ),
+    
+    pattern_type = case_when(
+      n_positive_definite == 4 ~
+        "All positive definite",
+      
+      n_failed_or_nonfinite > 0 ~
+        "At least one failed/non-finite diagnostic",
+      
+      n_indefinite > 0 ~
+        "At least one indefinite Hessian",
+      
+      n_near_singular > 0 ~
+        "At least one near-singular Hessian",
+      
+      TRUE ~
+        "Other mixed pattern"
+    ),
+    
+    pattern_type = factor(pattern_type, levels = pattern_levels)
+  ) |>
+  left_join(pattern_codes, by = "pattern_type") |>
+  rowwise() |>
+  mutate(
+    problematic_models = paste(
+      c("LBT", "LID", "DABT", "DALID")[
+        c_across(c(LBT, LID, DABT, DALID)) %in% problem_statuses
+      ],
+      collapse = ", "
+    ),
+    problematic_models = if_else(
+      problematic_models == "",
+      "None",
+      problematic_models
+    )
+  ) |>
+  ungroup() |>
+  arrange(
+    pattern,
+    desc(n_datasets),
+    LBT, LID, DABT, DALID
+  )
+
+hess_status_pattern_table
+
+hess_status_pattern_compact <- hess_status_pattern_table |>
+  mutate(
+    across(
+      c(LBT, LID, DABT, DALID),
+      ~ recode(.x, !!!status_abbrev)
+    )
+  ) |>
+  select(
+    pattern,
+    problematic_models,
+    LBT, LID, DABT, DALID,
+    n_datasets,
+    proportion
+  )
+
+hess_status_pattern_compact
+
+highlight_hessian_patterns <- results |>
+  filter(dataset_name %in% highlighted_datasets) |>
+  transmute(
+    dataset_name,
+    LBT   = null_hess_status_clean,
+    LID   = full_hess_status_clean,
+    DABT  = only_theta_hess_status_clean,
+    DALID = full_theta_hess_status_clean
+  ) |>
+  mutate(
+    across(
+      c(LBT, LID, DABT, DALID),
+      ~ if_else(is.na(.x), "Missing status", .x)
+    ),
+    
+    n_positive_definite = rowSums(
+      across(c(LBT, LID, DABT, DALID), ~ .x == "Positive definite")
+    ),
+    n_near_singular = rowSums(
+      across(c(LBT, LID, DABT, DALID), ~ .x == "Near-singular")
+    ),
+    n_indefinite = rowSums(
+      across(c(LBT, LID, DABT, DALID), ~ .x == "Indefinite")
+    ),
+    n_failed_or_nonfinite = rowSums(
+      across(
+        c(LBT, LID, DABT, DALID),
+        ~ .x %in% c(
+          "Fit failed",
+          "Hessian failed",
+          "Hessian non-finite",
+          "Eigen failed",
+          "Eigenvalue missing",
+          "Hessian status missing",
+          "Missing status"
+        )
+      )
+    ),
+    
+    pattern_type = case_when(
+      n_positive_definite == 4 ~
+        "All positive definite",
+      
+      n_failed_or_nonfinite > 0 ~
+        "At least one failed/non-finite diagnostic",
+      
+      n_indefinite > 0 ~
+        "At least one indefinite Hessian",
+      
+      n_near_singular > 0 ~
+        "At least one near-singular Hessian",
+      
+      TRUE ~
+        "Other mixed pattern"
+    ),
+    
+    pattern_type = factor(pattern_type, levels = pattern_levels)
+  ) |>
+  left_join(pattern_codes, by = "pattern_type") |>
+  rowwise() |>
+  mutate(
+    problematic_models = paste(
+      c("LBT", "LID", "DABT", "DALID")[
+        c_across(c(LBT, LID, DABT, DALID)) %in% problem_statuses
+      ],
+      collapse = ", "
+    ),
+    problematic_models = if_else(
+      problematic_models == "",
+      "None",
+      problematic_models
+    )
+  ) |>
+  ungroup() |>
+  mutate(
+    across(
+      c(LBT, LID, DABT, DALID),
+      ~ recode(.x, !!!status_abbrev)
+    )
+  ) |>
+  select(
+    dataset_name,
+    pattern,
+    problematic_models,
+    LBT, LID, DABT, DALID
+  ) |>
+  arrange(pattern, dataset_name)
+
+highlight_hessian_patterns
+
+# ============================================================
+# Log-likelihood surface visualizations
+# ============================================================
+
+get_matrix_from_fileid <- function(fileid, dom.data) {
+  M <- dom.data[[fileid]]$matrix
+  
+  if (is.null(M)) {
+    stop("Fant ikke matrix for fileid = ", fileid)
+  }
+  
+  M
+}
+
+make_profile_obj <- function(fileid,
+                             model = c("LID", "DABT"),
+                             results,
+                             dom.data,
+                             make_pair_data,
+                             f_full,
+                             f_only_theta) {
+  
+  model <- match.arg(model)
+  
+  row <- results |> 
+    filter(.data$fileid == !!fileid)
+  
+  if (nrow(row) != 1) {
+    stop("Forventet n??yaktig ??n rad i results for fileid = ", fileid)
+  }
+  
+  M <- get_matrix_from_fileid(fileid, dom.data)
+  dat <- make_pair_data(M, drop_zero = TRUE)
+  n_dyads <- length(dat$z)
+  n <- nrow(M)
+  
+  if (model == "LID") {
+    
+    parameters <- list(
+      x = matrix(0, nrow = n, ncol = 2),
+      log_r = row$full_log_r_est,
+      a = row$full_a_est
+    )
+    
+    obj <- RTMB::MakeADFun(
+      cmb(f_full, dat),
+      parameters = parameters,
+      random = "x",
+      silent = TRUE
+    )
+    
+  } else if (model == "DABT") {
+    
+    parameters <- list(
+      x = matrix(0, nrow = n, ncol = 2),
+      theta_raw = rep(0, n_dyads),
+      log_r = row$only_theta_log_r_est,
+      log_sigma_theta = row$only_theta_log_sigma_theta_est
+    )
+    
+    obj <- RTMB::MakeADFun(
+      cmb(f_only_theta, dat),
+      parameters = parameters,
+      random = c("x", "theta_raw"),
+      silent = TRUE
+    )
+  }
+  
+  obj
+}
+
+profile_loglik_grid <- function(fileid,
+                                model = c("LID", "DABT"),
+                                results,
+                                dom.data,
+                                make_pair_data,
+                                f_full,
+                                f_only_theta,
+                                n_grid = 50,
+                                beta_factor = c(0.01, 640),
+                                a_width = NULL,
+                                sigma_factor = c(0.01, 8),
+                                min_a = 0,
+                                min_sigma = 1e-8,
+                                min_beta = 1e-16,
+                                fallback_beta = 2,
+                                fallback_a = 0.4,
+                                fallback_sigma = 0.5,
+                                verbose = TRUE) {
+  
+  model <- match.arg(model)
+  
+  is_bad <- function(x) {
+    length(x) != 1 || is.na(x) || is.nan(x) || is.infinite(x)
+  }
+  
+  safe_positive <- function(x, fallback, lower = 1e-16) {
+    if (is_bad(x) || x <= lower) {
+      fallback
+    } else {
+      x
+    }
+  }
+  
+  safe_real <- function(x, fallback) {
+    if (is_bad(x)) {
+      fallback
+    } else {
+      x
+    }
+  }
+  
+  row <- results |> 
+    dplyr::filter(.data$fileid == !!fileid)
+  
+  if (nrow(row) != 1) {
+    stop("Forventet n??yaktig ??n rad i results for fileid = ", fileid)
+  }
+  
+  obj <- make_profile_obj(
+    fileid = fileid,
+    model = model,
+    results = results,
+    dom.data = dom.data,
+    make_pair_data = make_pair_data,
+    f_full = f_full,
+    f_only_theta = f_only_theta
+  )
+  
+  if (model == "LID") {
+    
+    raw_log_r <- row$full_log_r_est
+    raw_a     <- row$full_a_est
+    
+    beta_hat <- if (is_bad(raw_log_r)) {
+      fallback_beta
+    } else {
+      exp(raw_log_r)
+    }
+    
+    beta_hat <- safe_positive(
+      beta_hat,
+      fallback = fallback_beta,
+      lower = min_beta
+    )
+    
+    a_hat <- safe_real(
+      raw_a,
+      fallback = fallback_a
+    )
+    
+    a_hat <- max(min_a, a_hat)
+    
+    used_fallback <- is_bad(raw_log_r) || is_bad(raw_a) || beta_hat <= min_beta
+    
+    if (verbose && used_fallback) {
+      message(
+        "Using fallback/moderate parameter values for fileid = ",
+        fileid,
+        ", model = LID. Values used: beta = ",
+        signif(beta_hat, 4),
+        ", a = ",
+        signif(a_hat, 4)
+      )
+    }
+    
+    if (is.null(a_width)) {
+      a_width <- max(0.5, 1.5 * abs(a_hat), 0.25 * beta_hat)
+    }
+    
+    #beta_grid <- seq(
+      #1e-8,
+      #max(min_beta, beta_factor[2] * beta_hat),
+      #length.out = n_grid
+    #)
+    beta_grid <- seq(
+      1e-8,
+      2,
+      length.out = n_grid
+    )
+    
+    a_grid <- seq(
+      1e-8,
+      max(min_a, a_hat + a_width),
+      length.out = n_grid
+    )
+    
+    grid <- tidyr::expand_grid(
+      beta = beta_grid,
+      a = a_grid
+    )
+    
+    grid_eval <- grid |>
+      dplyr::mutate(
+        log_r = log(beta),
+        nll = purrr::map2_dbl(log_r, a, \(lr, aa) {
+          par <- obj$par
+          par["log_r"] <- lr
+          par["a"] <- aa
+          
+          val <- tryCatch(
+            obj$fn(par),
+            error = function(e) NA_real_
+          )
+          
+          val
+        }),
+        logLik = -nll,
+        rel_logLik = logLik - max(logLik, na.rm = TRUE),
+        model = "LID",
+        fileid = fileid,
+        grid_center_beta = beta_hat,
+        grid_center_a = a_hat,
+        used_fallback = used_fallback
+      )
+    
+  } else if (model == "DABT") {
+    
+    raw_log_r       <- row$only_theta_log_r_est
+    raw_sigma_theta <- row$only_theta_sigma_theta_est
+    
+    beta_hat <- if (is_bad(raw_log_r)) {
+      fallback_beta
+    } else {
+      exp(raw_log_r)
+    }
+    
+    beta_hat <- safe_positive(
+      beta_hat,
+      fallback = fallback_beta,
+      lower = min_beta
+    )
+    
+    sigma_hat <- safe_positive(
+      raw_sigma_theta,
+      fallback = fallback_sigma,
+      lower = min_sigma
+    )
+    
+    used_fallback <- is_bad(raw_log_r) || 
+      is_bad(raw_sigma_theta) || 
+      beta_hat <= min_beta || 
+      sigma_hat <= min_sigma
+    
+    if (verbose && used_fallback) {
+      message(
+        "Using fallback/moderate parameter values for fileid = ",
+        fileid,
+        ", model = DABT. Values used: beta = ",
+        signif(beta_hat, 4),
+        ", sigma_theta = ",
+        signif(sigma_hat, 4)
+      )
+    }
+    
+    beta_grid <- seq(
+      max(min_beta, beta_factor[1] * beta_hat),
+      max(min_beta, beta_factor[2] * beta_hat),
+      length.out = n_grid
+    )
+    
+    sigma_grid <- exp(seq(
+      log(max(min_sigma, sigma_factor[1] * sigma_hat)),
+      log(max(min_sigma, sigma_factor[2] * sigma_hat)),
+      length.out = n_grid
+    ))
+    
+    grid <- tidyr::expand_grid(
+      beta = beta_grid,
+      sigma_theta = sigma_grid
+    )
+    
+    grid_eval <- grid |>
+      dplyr::mutate(
+        log_r = log(beta),
+        log_sigma_theta = log(sigma_theta),
+        nll = purrr::map2_dbl(log_r, log_sigma_theta, \(lr, lsig) {
+          par <- obj$par
+          par["log_r"] <- lr
+          par["log_sigma_theta"] <- lsig
+          
+          val <- tryCatch(
+            obj$fn(par),
+            error = function(e) NA_real_
+          )
+          
+          val
+        }),
+        logLik = -nll,
+        rel_logLik = logLik - max(logLik, na.rm = TRUE),
+        model = "DABT",
+        fileid = fileid,
+        grid_center_beta = beta_hat,
+        grid_center_sigma_theta = sigma_hat,
+        used_fallback = used_fallback
+      )
+  }
+  
+  grid_eval
+}
+
+plot_profile_contour_2d <- function(grid_eval,
+                                    use_relative = FALSE,
+                                    bins = 80,
+                                    legend_n = 6,
+                                    legend_breaks = NULL) {
+  
+  model <- unique(grid_eval$model)
+  
+  if (length(model) != 1) {
+    stop("grid_eval m?? komme fra ??n modell.")
+  }
+  
+  # Remove invalid log-likelihood values
+  grid_eval <- grid_eval |>
+    dplyr::filter(is.finite(logLik))
+  
+  if (nrow(grid_eval) == 0) {
+    stop("Ingen endelige logLik-verdier ?? plotte.")
+  }
+  
+  # Recompute relative log-likelihood using only finite values
+  grid_eval <- grid_eval |>
+    dplyr::mutate(
+      rel_logLik = logLik - max(logLik, na.rm = TRUE)
+    )
+  
+  z_var <- if (use_relative) "rel_logLik" else "logLik"
+  
+  z_range <- range(grid_eval[[z_var]], na.rm = TRUE)
+  
+  if (!all(is.finite(z_range))) {
+    stop("z_range er ikke endelig: ", paste(z_range, collapse = ", "))
+  }
+  
+  if (diff(z_range) == 0) {
+    stop("Alle gyldige ", z_var, "-verdier er like. Kan ikke lage contour-plot.")
+  }
+  
+  contour_breaks <- seq(
+    z_range[1],
+    z_range[2],
+    length.out = bins + 1
+  )
+  
+  if (is.null(legend_breaks)) {
+    legend_breaks <- pretty(z_range, n = legend_n)
+    legend_breaks <- legend_breaks[
+      legend_breaks >= z_range[1] & legend_breaks <= z_range[2]
+    ]
+  }
+  
+  fill_lab <- if (use_relative) {
+    expression(ell - max(ell))
+  } else {
+    "Log-likelihood"
+  }
+  
+  fill_scale <- scale_fill_gradientn(
+    colours = hcl.colors(256, "viridis"),
+    breaks = legend_breaks,
+    limits = z_range,
+    name = fill_lab,
+    guide = guide_colorbar(
+      ticks = TRUE,
+      barheight = unit(5, "cm")
+    )
+  )
+  
+  mle_point <- grid_eval |>
+    dplyr::slice_max(logLik, n = 1, with_ties = FALSE)
+  
+  if (model == "LID") {
+    
+    p <- ggplot(grid_eval, aes(x = a, y = beta, z = .data[[z_var]])) +
+      geom_contour_filled(
+        aes(fill = after_stat(level_mid)),
+        breaks = contour_breaks
+      ) +
+      geom_point(
+        data = mle_point,
+        aes(x = a, y = beta),
+        inherit.aes = FALSE,
+        size = 3.6
+      ) +
+      fill_scale +
+      labs(
+        x = expression(a),
+        y = expression(beta)
+      ) +
+      theme_bw(base_size = 22)
+    
+  } else if (model == "DABT") {
+    
+    p <- ggplot(grid_eval, aes(x = sigma_theta, y = beta, z = .data[[z_var]])) +
+      geom_contour_filled(
+        aes(fill = after_stat(level_mid)),
+        breaks = contour_breaks
+      ) +
+      geom_point(
+        data = mle_point,
+        aes(x = sigma_theta, y = beta),
+        inherit.aes = FALSE,
+        size = 3.6
+      ) +
+      scale_y_log10() +
+      fill_scale +
+      labs(
+        x = expression(sigma[theta]),
+        y = expression(beta)
+      ) +
+      theme_bw(base_size = 22)
+  }
+  
+  p
+}
+#dom.data_filtered$ScottLockhard_1999b$matrix
+
+plot_profile_contour_3d <- function(grid_eval,
+                                   use_relative = TRUE) {
+  
+  z_var <- if (use_relative) "rel_logLik" else "logLik"
+  model <- unique(grid_eval$model)
+  
+  if (length(model) != 1) {
+    stop("grid_eval m?? komme fra ??n modell.")
+  }
+  
+  if (model == "LID") {
+    
+    zmat <- grid_eval |>
+      select(beta, a, z = all_of(z_var)) |>
+      tidyr::pivot_wider(names_from = a, values_from = z) |>
+      arrange(beta)
+    
+    x <- zmat$beta
+    y <- as.numeric(names(zmat)[-1])
+    z <- as.matrix(zmat[, -1])
+    
+    fig <- plot_ly(
+      x = x,
+      y = y,
+      z = z,
+      type = "surface",
+      contours = list(
+        z = list(
+          show = TRUE,
+          usecolormap = TRUE,
+          highlightcolor = "#ff0000",
+          project = list(z = TRUE)
+        )
+      )
+    ) |>
+      layout(
+        title = paste("LID profile log-likelihood:", unique(grid_eval$fileid)),
+        scene = list(
+          xaxis = list(title = "beta"),
+          yaxis = list(title = "a"),
+          zaxis = list(title = if (use_relative) "relative logLik" else "logLik")
+        )
+      )
+    
+  } else if (model == "DABT") {
+    
+    zmat <- grid_eval |>
+      mutate(log_sigma_theta_plot = log(sigma_theta)) |>
+      select(beta, log_sigma_theta_plot, z = all_of(z_var)) |>
+      tidyr::pivot_wider(names_from = log_sigma_theta_plot, values_from = z) |>
+      arrange(beta)
+    
+    x <- zmat$beta
+    y <- as.numeric(names(zmat)[-1])
+    z <- as.matrix(zmat[, -1])
+    
+    fig <- plot_ly(
+      x = x,
+      y = y,
+      z = z,
+      type = "surface",
+      contours = list(
+        z = list(
+          show = TRUE,
+          usecolormap = TRUE,
+          highlightcolor = "#ff0000",
+          project = list(z = TRUE)
+        )
+      )
+    ) |>
+      layout(
+        title = paste("DABT profile log-likelihood:", unique(grid_eval$fileid)),
+        scene = list(
+          xaxis = list(title = "beta"),
+          yaxis = list(title = "log(sigma_theta)"),
+          zaxis = list(title = if (use_relative) "relative logLik" else "logLik")
+        )
+      )
+  }
+  
+  fig
+}
+
+fileid_i <- "Poisbleau_2005c"
+
+# LID: loglikelihood som funksjon av beta og a
+grid_lid <- profile_loglik_grid(
+  fileid = fileid_i,
+  model = "LID",
+  results = results,
+  dom.data = dom.data_filtered,
+  make_pair_data = make_pair_data,
+  f_full = f_full,
+  f_only_theta = f_only_theta,
+  n_grid = 150
+)
+
+p_lid_2d <- plot_profile_contour_2d(grid_lid)
+p_lid_2d
