@@ -2925,3 +2925,86 @@ grid_lid <- profile_loglik_grid(
 
 p_lid_2d <- plot_profile_contour_2d(grid_lid)
 p_lid_2d
+
+# ====================================================================
+# Predicitve
+# ====================================================================
+
+weighted_frob_norm_table <- probability_agreement %>%
+  filter(dataset_name %in% highlight_fileids) %>%
+  select(dataset_name, model, weighted_frobenius_norm) %>%
+  mutate(
+    model = factor(
+      model, levels = c("null", "full", "only_theta", "full_theta")
+    ),
+    weighted_frobenius_norm = sprintf("%.3f", weighted_frobenius_norm)
+  ) %>%
+  pivot_wider(names_from = model,
+              values_from = weighted_frobenius_norm) %>%
+  arrange(dataset_name) %>%
+  select(dataset_name, null, full, only_theta, full_theta) %>%
+  rename(
+    Dataset = dataset_name,
+    LBT = null,
+    LID = full,
+    DABT = only_theta,
+    DALID = full_theta
+  )
+latex_weighted_frob_table <- weighted_frob_norm_table %>%
+  knitr::kable(
+    format = "latex",
+    bootabs = TRUE,
+    escape = FALSE,
+    caption = "Weighted Frobenius norm by dataset and model",
+    label = "tab:weighted_frob_norm"
+  ) %>%
+  kableExtra::kable_styling(
+    latex_options = c("hold_position", "scale_down")
+  )
+latex_weighted_frob_table
+
+prob_agreement_plot <- probability_agreement %>%
+  mutate(
+    model = factor(model, levels = model_levels),
+    log_total_interactions = log1p(total_interactions),
+    log_n_dyads = log1p(n_dyads),
+    log_weighted_frobenius_norm = log(weighted_frobenius_norm + 1e-8),
+    log_D_WMAD = log(D_WMAD + 1e-8)
+  )
+
+ggplot(fitted_probs_plot, aes(x = p_sat, y = p_hat)) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed") +
+  geom_point(aes(size = s), alpha = 0.15) +
+  facet_wrap(
+    ~ model,
+    labeller = labeller(model = model_labels)
+  ) +
+  coord_equal(xlim = c(0, 1), ylim = c(0, 1)) +
+  labs(
+    x = expression("Saturated probability, " * hat(p)[ij]^sat),
+    y = expression("Fitted probability, " * hat(p)[ij]^M),
+    title = ""
+  ) +
+  theme_bw(base_size = 18) + 
+  theme(
+    axis.text.x = element_text(face = "bold"),
+    axis.text.y = element_text(face = "bold"),
+  )
+ggplot(fitted_probs_plot, aes(x = s, y = abs_residual)) +
+  geom_point(alpha = 0.12) +
+  geom_smooth(se = FALSE) +
+  scale_x_log10() +
+  facet_wrap(
+    ~ model,
+    labeller = labeller(model = model_labels)
+  ) +
+  labs(
+    x = expression("Number of interactions in dyad, " * s[ij]),
+    y = expression(abs(hat(p)[ij]^M - hat(p)[ij]^sat)),
+    title = ""
+  ) +
+  theme_bw(base_size = 20) + 
+  theme(
+    axis.text.x = element_text(face = "bold"),
+    axis.text.y = element_text(face = "bold"),
+  )
